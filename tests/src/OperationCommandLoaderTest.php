@@ -69,7 +69,7 @@ class OperationCommandLoaderTest extends TestCase
         unlink($path);
 
         $this->assertSame(Command::SUCCESS, $exitCode);
-        $this->assertSame(['data' => 12], json_decode($tester->getDisplay(), true));
+        $this->assertSame(12, json_decode($tester->getDisplay(), true)['data']);
     }
 
     public function testGetThrowsCommandNotFoundExceptionForAnUnknownName(): void

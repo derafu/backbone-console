@@ -14,10 +14,14 @@ namespace Derafu\TestsBackboneConsole;
 
 use Derafu\BackboneConsole\Service\PayloadCodec;
 use Derafu\BackboneConsole\ValueObject\PayloadFormat;
+use Derafu\BackboneDispatcher\ValueObject\SafeThrowable;
 use Derafu\Xml\Service\XmlDecoder;
 use Derafu\Xml\Service\XmlEncoder;
+use JsonException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
+use Symfony\Component\Yaml\Exception\ParseException as YamlParseException;
 
 #[CoversClass(PayloadCodec::class)]
 class PayloadCodecTest extends TestCase
@@ -83,5 +87,67 @@ class PayloadCodecTest extends TestCase
         [$format] = $this->codec->decode('{"parameters": {}}');
 
         $this->assertSame(PayloadFormat::Json, $format);
+    }
+
+    /**
+     * Regression: a `JsonSerializable` value nested inside the data (e.g.
+     * `ProblemDetailInterface::getThrowable()`) used to be silently dumped
+     * as `null` by `Yaml::dump()`, which does not know about
+     * `JsonSerializable` the way `json_encode()` does.
+     */
+    public function testEncodesANestedJsonSerializableValueToYamlInsteadOfNull(): void
+    {
+        $throwable = SafeThrowable::fromThrowable(new RuntimeException('boom', 42));
+
+        $encoded = $this->codec->encode(['throwable' => $throwable], PayloadFormat::Yaml);
+
+        $this->assertStringNotContainsString('throwable: null', $encoded);
+        $this->assertStringContainsString('class: RuntimeException', $encoded);
+        $this->assertStringContainsString('message: boom', $encoded);
+    }
+
+    /**
+     * Regression: the same nested `JsonSerializable` value used to reach
+     * `XmlEncoderInterface::encode()` as a raw object, which flattened it
+     * into a single opaque string via `Stringable::__toString()` instead
+     * of one node per field.
+     */
+    public function testEncodesANestedJsonSerializableValueToXmlWithOneNodePerField(): void
+    {
+        $throwable = SafeThrowable::fromThrowable(new RuntimeException('boom', 42));
+
+        $encoded = $this->codec->encode(['throwable' => $throwable], PayloadFormat::Xml);
+
+        $this->assertStringContainsString('<class>RuntimeException</class>', $encoded);
+        $this->assertStringContainsString('<message>boom</message>', $encoded);
+        $this->assertStringContainsString('<code>42</code>', $encoded);
+    }
+
+    /**
+     * Regression: content starting with `{`/`[` used to silently fall
+     * through to `Yaml::parse()` when it failed as JSON — a trailing comma
+     * is invalid JSON but valid YAML flow-style, so this used to parse
+     * into `['parameters' => ['a' => 5]]` (silently dropping whatever came
+     * after the comma) instead of failing loudly.
+     */
+    public function testMalformedJsonThrowsInsteadOfSilentlyReinterpretingAsYaml(): void
+    {
+        $this->expectException(JsonException::class);
+
+        $this->codec->decode('{"parameters": {"a": 5,}}');
+    }
+
+    public function testTruncatedJsonThrowsInsteadOfSilentlyReinterpretingAsYaml(): void
+    {
+        $this->expectException(JsonException::class);
+
+        $this->codec->decode('{"parameters": {"xml": "abc"');
+    }
+
+    public function testMalformedYamlThatDoesNotLookLikeJsonStillThrowsTheUnderlyingYamlException(): void
+    {
+        $this->expectException(YamlParseException::class);
+
+        $this->codec->decode("parameters:\n  a: [1, 2\n");
     }
 }

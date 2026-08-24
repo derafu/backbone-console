@@ -14,13 +14,16 @@ namespace Derafu\BackboneConsole\Service;
 
 use Derafu\BackboneConsole\Contract\ExitCodeResolverInterface;
 use Derafu\BackboneConsole\Contract\PayloadCodecInterface;
+use Derafu\BackboneConsole\ValueObject\PayloadFormat;
 use Derafu\BackboneDispatcher\Contract\SafeDispatcherInterface;
 use Derafu\BackboneDispatcher\ValueObject\OperationRequest;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\ConsoleOutputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Throwable;
 
 /**
  * Runs exactly one Backbone operation, given a `SafeDispatcherInterface`
@@ -34,9 +37,50 @@ use Symfony\Component\Console\Output\OutputInterface;
  * `SafeExplorerInterface`) knows about at runtime, not this class. The
  * response is written in that same format: whatever format the request
  * came in as.
+ *
+ * The response payload's shape does not depend on where it is written
+ * (STDOUT/STDERR vs `--output`/`--error-output`) — only on `-v`/
+ * `--verbose`, and only for how *much* ends up in it, never whether the
+ * envelope itself is there. A successful response is always
+ * `{"meta": {"timestamp": ..., "data_type": ...}, "data": ...}` — the
+ * same envelope [Backbone API](/docs/core/backbone-api) uses, so a caller
+ * does not have to special-case which transport it is talking to. A
+ * failed one is always `OperationResultInterface::getProblem()->toArray()`
+ * (`extensions.timestamp`/`extensions.data_type` included there too,
+ * `data_type` always `null` — there is no value to describe). With `-v`,
+ * `OperationResultInterface::getMetadata()`'s remaining fields (timing,
+ * memory, CPU, load average) are merged in — into `meta` on success,
+ * into `extensions` on failure (next to the already-present
+ * `debug`/`context`/`throwable`) — never introducing a new top-level key.
  */
 class GenericOperationCommand extends Command
 {
+    /**
+     * `sysexits(3)`: "An input file did not exist or was not readable."
+     */
+    public const EX_NOINPUT = 66;
+
+    /**
+     * `sysexits(3)`: "A (user specified) output file cannot be created."
+     */
+    public const EX_CANTCREAT = 73;
+
+    /**
+     * `sysexits(3)`: "The input data was incorrect in some way."
+     */
+    public const EX_DATAERR = 65;
+
+    /**
+     * `sysexits(3)`: "An internal software error has been detected."
+     *
+     * The last-resort exit code: anything genuinely unexpected — a bug,
+     * not a usage or business-level problem — that would otherwise escape
+     * uncaught and let Symfony Console's own default exception rendering
+     * take over, breaking the promise that a caller (of any language,
+     * across a process boundary) always gets a structured response.
+     */
+    public const EX_SOFTWARE = 70;
+
     public function __construct(
         private readonly string $operationId,
         private readonly SafeDispatcherInterface $dispatcher,
@@ -71,14 +115,32 @@ class GenericOperationCommand extends Command
     {
         if ($this->operationDoc !== null) {
             $this->setDescription((string) ($this->operationDoc['summary'] ?? ''));
-            $this->setHelp($this->buildHelp());
         }
+
+        $this->setHelp($this->buildHelp());
 
         $this->addArgument(
             'input',
             InputArgument::OPTIONAL,
             'Path to a JSON/YAML/XML file with the request (parameters go '
                 . 'under the "parameters" key). Omitted, or "-", reads from STDIN.',
+        );
+
+        $this->addOption(
+            'output',
+            null,
+            InputOption::VALUE_REQUIRED,
+            'Path to write the result to on success, instead of STDOUT. Omitted, or "-", writes to STDOUT. '
+                . 'The format is inferred from the extension (.json/.yaml/.yml/.xml); an unrecognized or '
+                . 'missing one falls back to the request\'s own format.',
+        );
+
+        $this->addOption(
+            'error-output',
+            null,
+            InputOption::VALUE_REQUIRED,
+            'Path to write the problem detail to on failure, instead of STDERR. Omitted, or "-", writes to '
+                . 'STDERR. Same format-inference rule as --output. Never used on success.',
         );
     }
 
@@ -87,33 +149,163 @@ class GenericOperationCommand extends Command
      */
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $raw = $this->readInput($input);
-        [$format, $data] = $this->codec->decode($raw);
-        $parameters = is_array($data['parameters'] ?? null) ? $data['parameters'] : [];
-
-        $request = OperationRequest::fromId($this->operationId, $parameters);
-        $result = $this->dispatcher->dispatch($request);
-
-        if ($result->isSuccess()) {
-            $output->writeln($this->codec->encode(['data' => $result->getValue()], $format));
-
-            return self::SUCCESS;
+        $raw = $this->readInput($input, $output);
+        if ($raw === null) {
+            return self::EX_NOINPUT;
         }
 
-        $problem = $result->getProblem();
-        $this->errorOutput($output)->writeln($this->codec->encode($problem->toArray(), $format));
+        try {
+            [$format, $data] = $this->codec->decode($raw);
+        } catch (Throwable $e) {
+            $this->errorOutput($output)->writeln(sprintf(
+                'Could not parse the request: %s',
+                $e->getMessage(),
+            ));
 
-        return $this->exitCodeResolver->resolve($problem);
+            return self::EX_DATAERR;
+        }
+
+        // From here on, nothing should throw: dispatching itself never
+        // does (that is the whole point of SafeDispatcherInterface), and
+        // OperationRequest::fromId()/encode()/the exit code resolver only
+        // could on a genuine bug (a malformed operation id from a broken
+        // SafeExplorerInterface wiring, a business value this codec's own
+        // encoders cannot represent, a resolver that misbehaves) rather
+        // than anything a caller did wrong. Caught here as a last resort
+        // so it still degrades into a structured message instead of
+        // Symfony Console's own default exception rendering.
+        try {
+            $parameters = is_array($data['parameters'] ?? null) ? $data['parameters'] : [];
+
+            $request = OperationRequest::fromId($this->operationId, $parameters);
+            $result = $this->dispatcher->dispatch($request);
+
+            if ($result->isSuccess()) {
+                $outputPath = $input->getOption('output');
+                $meta = ['timestamp' => $result->getMetadata()->getTimestamp()];
+                if ($output->isVerbose()) {
+                    $meta += $result->getMetadata()->toArray();
+                }
+                $meta['data_type'] = $result->getDataType();
+
+                $content = $this->codec->encode(
+                    ['meta' => $meta, 'data' => $result->getValue()],
+                    $this->resolveFormat($outputPath, $format),
+                );
+
+                if (!$this->write($outputPath, $content, $output)) {
+                    return self::EX_CANTCREAT;
+                }
+
+                return self::SUCCESS;
+            }
+
+            $problem = $result->getProblem();
+            $payload = $problem->toArray();
+            if ($output->isVerbose()) {
+                $payload['extensions'] += $result->getMetadata()->toArray();
+            }
+
+            $errorOutputPath = $input->getOption('error-output');
+            $content = $this->codec->encode(
+                $payload,
+                $this->resolveFormat($errorOutputPath, $format),
+            );
+
+            if (!$this->write($errorOutputPath, $content, $output, toErrorStream: true)) {
+                return self::EX_CANTCREAT;
+            }
+
+            return $this->exitCodeResolver->resolve($problem);
+        } catch (Throwable $e) {
+            $this->errorOutput($output)->writeln(sprintf(
+                'Unexpected error: %s',
+                $e->getMessage(),
+            ));
+
+            return self::EX_SOFTWARE;
+        }
+    }
+
+    /**
+     * Resolves the format a response should be written in: the given
+     * path's own extension if recognized, or the request's format
+     * otherwise (including when no path was given at all, i.e. STDOUT/
+     * STDERR).
+     *
+     * @param string|null $path
+     * @param PayloadFormat $requestFormat
+     * @return PayloadFormat
+     */
+    private function resolveFormat(?string $path, PayloadFormat $requestFormat): PayloadFormat
+    {
+        if ($path === null || $path === '-') {
+            return $requestFormat;
+        }
+
+        return PayloadFormat::fromExtension($path) ?? $requestFormat;
+    }
+
+    /**
+     * Writes `$content` to `$path`, or to STDOUT/STDERR when `$path` is
+     * `null` or `"-"`.
+     *
+     * A failure to write to a real file is never silent: it is reported to
+     * the real STDERR (regardless of `$toErrorStream`, since that flag only
+     * picks the *default* stream for "no path given" — a write failure is
+     * a failure of this command itself, not of the operation it ran), and
+     * this method returns `false` so the caller never reports success.
+     *
+     * @param string|null $path
+     * @param string $content
+     * @param OutputInterface $output
+     * @param bool $toErrorStream Whether the default stream (used when
+     * `$path` is `null`/`"-"`) should be STDERR instead of STDOUT.
+     * @return bool `true` on success, `false` if writing to `$path` failed.
+     */
+    private function write(
+        ?string $path,
+        string $content,
+        OutputInterface $output,
+        bool $toErrorStream = false,
+    ): bool {
+        if ($path === null || $path === '-') {
+            ($toErrorStream ? $this->errorOutput($output) : $output)->writeln($content);
+
+            return true;
+        }
+
+        if (@file_put_contents($path, $content . "\n") === false) {
+            $reason = error_get_last()['message'] ?? 'unknown error';
+            $this->errorOutput($output)->writeln(sprintf(
+                'Could not write to "%s": %s',
+                $path,
+                $reason,
+            ));
+
+            return false;
+        }
+
+        return true;
     }
 
     /**
      * Reads the raw request content from the `input` argument, or STDIN
      * when it is omitted or explicitly `"-"`.
      *
+     * A failure to read a real file is never silent: `file_get_contents()`
+     * would otherwise return `false`, which a blind `(string)` cast turns
+     * into `""` — silently proceeding with an empty request instead of
+     * the one actually asked for, surfacing later (if at all) as a
+     * misleading business-level `ProblemDetail` (e.g. "missing parameter")
+     * that has nothing to do with the real cause. Reported to the real
+     * STDERR, and `null` returned so the caller never proceeds with it.
+     *
      * @param InputInterface $input
-     * @return string
+     * @param OutputInterface $output
+     * @return string|null
      */
-    private function readInput(InputInterface $input): string
+    private function readInput(InputInterface $input, OutputInterface $output): ?string
     {
         $path = $input->getArgument('input');
 
@@ -121,7 +313,19 @@ class GenericOperationCommand extends Command
             return (string) file_get_contents('php://stdin');
         }
 
-        return (string) file_get_contents($path);
+        $content = @file_get_contents($path);
+        if ($content === false) {
+            $reason = error_get_last()['message'] ?? 'unknown error';
+            $this->errorOutput($output)->writeln(sprintf(
+                'Could not read from "%s": %s',
+                $path,
+                $reason,
+            ));
+
+            return null;
+        }
+
+        return $content;
     }
 
     /**
@@ -141,9 +345,12 @@ class GenericOperationCommand extends Command
     }
 
     /**
-     * Builds the `--help` text from the operation's own reflected doc —
-     * every parameter's name/type/required/description, since none of
-     * them become individual CLI arguments.
+     * Builds the `--help` text: the operation's own reflected doc (every
+     * parameter's name/type/required/description, since none of them
+     * become individual CLI arguments), followed by every exit code this
+     * command can return — always shown, even without an `$operationDoc`,
+     * since the codes are a property of this class and the injected
+     * `ExitCodeResolverInterface`, not of the operation itself.
      *
      * @return string
      */
@@ -158,27 +365,71 @@ class GenericOperationCommand extends Command
         }
 
         $parameters = $this->operationDoc['parameters'] ?? [];
-        if ($parameters === []) {
-            return implode("\n", $lines);
-        }
+        if ($parameters !== []) {
+            $lines[] = 'Parameters (under the "parameters" key of the input):';
+            foreach ($parameters as $parameter) {
+                $requirement = ($parameter['required'] ?? false) ? 'required' : 'optional';
+                $line = sprintf(
+                    '  - %s (%s, %s)',
+                    $parameter['name'] ?? '?',
+                    $parameter['type'] ?? 'mixed',
+                    $requirement,
+                );
 
-        $lines[] = 'Parameters (under the "parameters" key of the input):';
-        foreach ($parameters as $parameter) {
-            $requirement = ($parameter['required'] ?? false) ? 'required' : 'optional';
-            $line = sprintf(
-                '  - %s (%s, %s)',
-                $parameter['name'] ?? '?',
-                $parameter['type'] ?? 'mixed',
-                $requirement,
-            );
+                if (!empty($parameter['description'])) {
+                    $line .= ': ' . $parameter['description'];
+                }
 
-            if (!empty($parameter['description'])) {
-                $line .= ': ' . $parameter['description'];
+                $lines[] = $line;
             }
 
-            $lines[] = $line;
+            $lines[] = '';
         }
 
+        array_push($lines, ...$this->buildExitCodesHelp());
+
+        $lines[] = '';
+        $lines[] = 'With -v/--verbose, the response also includes execution metadata '
+            . '(timing, memory, CPU, load average): "metadata" alongside "data" on '
+            . 'success, "extensions.metadata" on failure.';
+
         return implode("\n", $lines);
+    }
+
+    /**
+     * Builds the exit codes section of `--help`: the fixed codes this
+     * class itself can return (`SUCCESS`, the generic `FAILURE`, and the
+     * `sysexits(3)` ones for its own execution failures), plus whatever
+     * `ExitCodeResolverInterface::describe()` reports for this specific
+     * command's injected resolver — combining the framework's defaults
+     * with what a project registered on top of them, so neither has to be
+     * looked up separately to know the full picture.
+     *
+     * @return list<string>
+     */
+    private function buildExitCodesHelp(): array
+    {
+        $lines = [
+            'Exit codes:',
+            sprintf('  %d - Success.', self::SUCCESS),
+            sprintf('  %d - The operation failed.', self::FAILURE),
+        ];
+
+        foreach ($this->exitCodeResolver->describe() as $exceptionClass => $code) {
+            $lines[] = sprintf('  %d - %s.', $code, $exceptionClass);
+        }
+
+        $lines[] = sprintf(
+            '  %d - Malformed request data (could not parse it as JSON/YAML/XML).',
+            self::EX_DATAERR,
+        );
+        $lines[] = sprintf(
+            '  %d - The input file does not exist or is not readable.',
+            self::EX_NOINPUT,
+        );
+        $lines[] = sprintf('  %d - Unexpected internal error.', self::EX_SOFTWARE);
+        $lines[] = sprintf('  %d - The output file could not be created.', self::EX_CANTCREAT);
+
+        return $lines;
     }
 }
