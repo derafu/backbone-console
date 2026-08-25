@@ -87,8 +87,10 @@ class OperationCommandLoader implements CommandLoaderInterface
     }
 
     /**
-     * Walks `SafeExplorerInterface::tree()` once, mapping every operation
-     * found to its own Symfony Console command name.
+     * Walks `SafeExplorerInterface::tree()`'s `'packages'` once, mapping
+     * every operation found to its own Symfony Console command name — the
+     * sibling `'description'` key (about the whole package registry, not
+     * any one operation) is not relevant here.
      *
      * @return array<string, array>
      */
@@ -99,10 +101,10 @@ class OperationCommandLoader implements CommandLoaderInterface
         }
 
         $result = $this->explorer->tree();
-        $tree = $result->isSuccess() ? $result->getValue() : [];
+        $packages = $result->isSuccess() ? $result->getValue()['packages'] : [];
 
         $operations = [];
-        foreach ($tree as $package) {
+        foreach ($packages as $package) {
             foreach ($package['components'] ?? [] as $component) {
                 foreach ($component['workers'] ?? [] as $worker) {
                     foreach ($worker['operations'] ?? [] as $operation) {
