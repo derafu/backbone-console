@@ -345,55 +345,147 @@ class GenericOperationCommand extends Command
     }
 
     /**
-     * Builds the `--help` text: the operation's own reflected doc (every
-     * parameter's name/type/required/description, since none of them
-     * become individual CLI arguments), followed by every exit code this
-     * command can return — always shown, even without an `$operationDoc`,
-     * since the codes are a property of this class and the injected
-     * `ExitCodeResolverInterface`, not of the operation itself.
+     * Builds the `--help` text out of independent blocks (description,
+     * parameters, returns, throws, exit codes, links, the verbose note),
+     * each either the operation's own reflected doc (`$operationDoc`, the
+     * same dict `Documenter` in `derafu/backbone-api` reads — `returns`/
+     * `throws`/`links` included) or fixed text this class always shows.
+     * A block that has nothing to say returns `[]` and is dropped
+     * entirely — no empty section header, no stray blank line — with
+     * exactly one blank line separating whichever blocks did produce
+     * something.
      *
      * @return string
      */
     private function buildHelp(): string
     {
-        $lines = [];
-
         $description = $this->operationDoc['description'] ?? null;
-        if (!empty($description)) {
-            $lines[] = $description;
-            $lines[] = '';
-        }
 
-        $parameters = $this->operationDoc['parameters'] ?? [];
-        if ($parameters !== []) {
-            $lines[] = 'Parameters (under the "parameters" key of the input):';
-            foreach ($parameters as $parameter) {
-                $requirement = ($parameter['required'] ?? false) ? 'required' : 'optional';
-                $line = sprintf(
-                    '  - %s (%s, %s)',
-                    $parameter['name'] ?? '?',
-                    $parameter['type'] ?? 'mixed',
-                    $requirement,
-                );
+        $blocks = [
+            !empty($description) ? [$description] : [],
+            $this->buildParametersHelp(),
+            $this->buildReturnsHelp(),
+            $this->buildThrowsHelp(),
+            $this->buildExitCodesHelp(),
+            $this->buildLinksHelp(),
+            [
+                'With -v/--verbose, the response also includes execution metadata '
+                    . '(timing, memory, CPU, load average): "metadata" alongside "data" on '
+                    . 'success, "extensions.metadata" on failure.',
+            ],
+        ];
 
-                if (!empty($parameter['description'])) {
-                    $line .= ': ' . $parameter['description'];
-                }
-
-                $lines[] = $line;
+        $lines = [];
+        foreach (array_filter($blocks) as $block) {
+            if ($lines !== []) {
+                $lines[] = '';
             }
-
-            $lines[] = '';
+            array_push($lines, ...$block);
         }
-
-        array_push($lines, ...$this->buildExitCodesHelp());
-
-        $lines[] = '';
-        $lines[] = 'With -v/--verbose, the response also includes execution metadata '
-            . '(timing, memory, CPU, load average): "metadata" alongside "data" on '
-            . 'success, "extensions.metadata" on failure.';
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Builds the parameters section of `--help`: every parameter's own
+     * name/type/required/description, since none of them become
+     * individual CLI arguments.
+     *
+     * @return list<string>
+     */
+    private function buildParametersHelp(): array
+    {
+        $parameters = $this->operationDoc['parameters'] ?? [];
+        if ($parameters === []) {
+            return [];
+        }
+
+        $lines = ['Parameters (under the "parameters" key of the input):'];
+        foreach ($parameters as $parameter) {
+            $requirement = ($parameter['required'] ?? false) ? 'required' : 'optional';
+            $line = sprintf(
+                '  - %s (%s, %s)',
+                $parameter['name'] ?? '?',
+                $parameter['type'] ?? 'mixed',
+                $requirement,
+            );
+
+            if (!empty($parameter['description'])) {
+                $line .= ': ' . $parameter['description'];
+            }
+
+            $lines[] = $line;
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Builds the "Returns:" section of `--help`: the operation's reflected
+     * return type and `@return` description (`Inspector`'s `returns`) —
+     * skipped entirely for a `void`- or `never`-returning operation, since
+     * there is nothing to describe in either case (the second one never
+     * even completes normally). When `#[Operation(results: ['success' =>
+     * ['example' => ...]])]` provides one, a JSON-encoded example follows
+     * — the only source of a realistic response example, the same way
+     * `parameters[x]['example']` is attribute-only (reflection/PHPDoc
+     * alone can never produce one).
+     *
+     * @return list<string>
+     */
+    private function buildReturnsHelp(): array
+    {
+        $returns = $this->operationDoc['returns'] ?? null;
+        if (empty($returns['type']) || in_array($returns['type'], ['void', 'never'], true)) {
+            return [];
+        }
+
+        $lines = ['Returns:'];
+
+        $line = '  ' . $returns['type'];
+        if (!empty($returns['description'])) {
+            $line .= ' — ' . $returns['description'];
+        }
+        $lines[] = $line;
+
+        $results = $this->operationDoc['operation']['results'] ?? [];
+        $example = $results['success']['example'] ?? null;
+        if ($example !== null) {
+            $lines[] = '  Example:';
+            $encoded = json_encode($example, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            foreach (explode("\n", (string) $encoded) as $exampleLine) {
+                $lines[] = '    ' . $exampleLine;
+            }
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Builds the "Throws:" section of `--help`: every declared `@throws`
+     * with its description — distinct from "Exit codes:" below, which
+     * maps each one to the numeric code a caller actually gets back, not
+     * to *why* it happens.
+     *
+     * @return list<string>
+     */
+    private function buildThrowsHelp(): array
+    {
+        $throws = $this->operationDoc['throws'] ?? [];
+        if ($throws === []) {
+            return [];
+        }
+
+        $lines = ['Throws:'];
+        foreach ($throws as $throw) {
+            $line = '  - ' . ($throw['type'] ?? '?');
+            if (!empty($throw['description'])) {
+                $line .= ': ' . $throw['description'];
+            }
+            $lines[] = $line;
+        }
+
+        return $lines;
     }
 
     /**
@@ -403,7 +495,10 @@ class GenericOperationCommand extends Command
      * `ExitCodeResolverInterface::describe()` reports for this specific
      * command's injected resolver — combining the framework's defaults
      * with what a project registered on top of them, so neither has to be
-     * looked up separately to know the full picture.
+     * looked up separately to know the full picture. Always shown, even
+     * without an `$operationDoc`, since the codes are a property of this
+     * class and the injected `ExitCodeResolverInterface`, not of the
+     * operation itself.
      *
      * @return list<string>
      */
@@ -429,6 +524,35 @@ class GenericOperationCommand extends Command
         );
         $lines[] = sprintf('  %d - Unexpected internal error.', self::EX_SOFTWARE);
         $lines[] = sprintf('  %d - The output file could not be created.', self::EX_CANTCREAT);
+
+        return $lines;
+    }
+
+    /**
+     * Builds the "Links:" section of `--help`: every `@link` on the
+     * operation, plain text — unlike `derafu/backbone-api`'s `Documenter`,
+     * there is no OpenAPI `externalDocs` single-slot constraint to work
+     * around here (a CLI's `--help` is not a rich-text renderer either),
+     * so every link is always listed the same way regardless of how many
+     * there are.
+     *
+     * @return list<string>
+     */
+    private function buildLinksHelp(): array
+    {
+        $links = $this->operationDoc['links'] ?? [];
+        if ($links === []) {
+            return [];
+        }
+
+        $lines = ['Links:'];
+        foreach ($links as $link) {
+            $line = '  - ' . ($link['url'] ?? '');
+            if (!empty($link['description'])) {
+                $line .= ': ' . $link['description'];
+            }
+            $lines[] = $line;
+        }
 
         return $lines;
     }

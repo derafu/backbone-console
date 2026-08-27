@@ -534,6 +534,122 @@ class GenericOperationCommandTest extends TestCase
         $this->assertStringContainsString('The second addend, defaults to 10.', $help);
     }
 
+    /**
+     * `sum()` is documented with a `@return` description and a
+     * `#[Operation(results: ['success' => ['example' => 12]])]` response
+     * example — both should reach `--help`, the same reflected/attribute
+     * data `Documenter` (in `derafu/backbone-api`) already surfaces in the
+     * generated OpenAPI document.
+     */
+    public function testHelpShowsTheReturnsSectionWithTypeDescriptionAndExample(): void
+    {
+        $doc = Bootstrap::bootExplorer()
+            ->getOperation('example_package', 'example_component', 'example_worker', 'sum')
+            ->getValue()
+        ;
+
+        $command = new GenericOperationCommand(
+            $doc['id'],
+            $this->dispatcher,
+            $this->codec,
+            new DefaultExitCodeResolver(),
+            $doc,
+        );
+
+        $help = $command->getHelp();
+
+        $this->assertStringContainsString('Returns:', $help);
+        $this->assertStringContainsString('int — The sum of both addends.', $help);
+        $this->assertStringContainsString('Example:', $help);
+        $this->assertStringContainsString('12', $help);
+    }
+
+    /**
+     * `sum()` declares one `@throws` (`OverflowException`) — it should
+     * show up in its own "Throws:" section, with its description, distinct
+     * from "Exit codes:" (which maps exceptions to the numeric code a
+     * caller gets back, not to why they happen).
+     */
+    public function testHelpShowsTheThrowsSection(): void
+    {
+        $doc = Bootstrap::bootExplorer()
+            ->getOperation('example_package', 'example_component', 'example_worker', 'sum')
+            ->getValue()
+        ;
+
+        $command = new GenericOperationCommand(
+            $doc['id'],
+            $this->dispatcher,
+            $this->codec,
+            new DefaultExitCodeResolver(),
+            $doc,
+        );
+
+        $help = $command->getHelp();
+
+        $this->assertStringContainsString('Throws:', $help);
+        $this->assertStringContainsString(
+            'OverflowException: If the sum exceeds `PHP_INT_MAX`.',
+            $help,
+        );
+    }
+
+    /**
+     * `sum()` declares one `@link` — it should show up in a "Links:"
+     * section, with its URL and description.
+     */
+    public function testHelpShowsTheLinksSection(): void
+    {
+        $doc = Bootstrap::bootExplorer()
+            ->getOperation('example_package', 'example_component', 'example_worker', 'sum')
+            ->getValue()
+        ;
+
+        $command = new GenericOperationCommand(
+            $doc['id'],
+            $this->dispatcher,
+            $this->codec,
+            new DefaultExitCodeResolver(),
+            $doc,
+        );
+
+        $help = $command->getHelp();
+
+        $this->assertStringContainsString('Links:', $help);
+        $this->assertStringContainsString(
+            'https://example.test/docs/sum: Reference for this operation.',
+            $help,
+        );
+    }
+
+    /**
+     * `fail()` has no docblock at all (no `@return`) — the "Returns:"
+     * section must not appear for it, same as before this addition, since
+     * there is nothing real to say about what it returns (it always
+     * throws).
+     */
+    public function testHelpOmitsTheReturnsSectionWhenNothingIsDocumented(): void
+    {
+        $doc = Bootstrap::bootExplorer()
+            ->getOperation('example_package', 'example_component', 'example_worker', 'fail')
+            ->getValue()
+        ;
+
+        $command = new GenericOperationCommand(
+            $doc['id'],
+            $this->dispatcher,
+            $this->codec,
+            new DefaultExitCodeResolver(),
+            $doc,
+        );
+
+        $help = $command->getHelp();
+
+        $this->assertStringNotContainsString('Returns:', $help);
+        $this->assertStringNotContainsString('Throws:', $help);
+        $this->assertStringNotContainsString('Links:', $help);
+    }
+
     public function testHelpListsTheFixedFrameworkExitCodesEvenWithoutAnOperationDoc(): void
     {
         $command = new GenericOperationCommand(
