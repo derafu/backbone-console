@@ -27,6 +27,7 @@
     "require": {
         "php": "^8.5",
         "derafu/backbone-dispatcher": "dev-main",
+        "derafu/translation": "dev-main",
         "derafu/xml": "dev-main",
         "symfony/console": "^8.1",
         "symfony/yaml": "^8.1"
@@ -35,7 +36,11 @@
         "ext-xdebug": "*",
         "friendsofphp/php-cs-fixer": "^3.95",
         "phpstan/phpstan": "^2.2",
-        "phpunit/phpunit": "^13.3"
+        "phpunit/phpunit": "^13.4",
+        "nikic/php-parser": "^5.9"
+    },
+    "suggest": {
+        "nikic/php-parser": "Required by the tests of the messages of the package (Derafu\\Translation\\Lint reads the code)."
     },
     "scripts": {
         "tests": "XDEBUG_MODE=coverage vendor/bin/phpunit --configuration=phpunit.xml",

@@ -13,11 +13,11 @@ declare(strict_types=1);
 namespace Derafu\BackboneConsole\Service;
 
 use Derafu\BackboneConsole\Contract\PayloadCodecInterface;
+use Derafu\BackboneConsole\Exception\InvalidPayloadException;
 use Derafu\BackboneConsole\ValueObject\PayloadFormat;
 use Derafu\Xml\Contract\XmlDecoderInterface;
 use Derafu\Xml\Contract\XmlEncoderInterface;
 use Derafu\Xml\XmlDocument;
-use JsonException;
 use JsonSerializable;
 use Symfony\Component\Yaml\Yaml;
 
@@ -30,8 +30,9 @@ use Symfony\Component\Yaml\Yaml;
  * first would mean JSON is never actually detected as its own format.
  *
  * Content starting with `{` or `[` is treated as an unambiguous signal
- * that JSON was intended: if `json_decode()` fails on it, a `JsonException`
- * is thrown rather than silently falling through to `Yaml::parse()`. YAML's
+ * that JSON was intended: if `json_decode()` fails on it, an
+ * `InvalidPayloadException` (a `JsonException`) is thrown rather than silently
+ * falling through to `Yaml::parse()`. YAML's
  * flow-style mappings/sequences use that same syntax (loosely — trailing
  * commas and unquoted keys are valid YAML but not valid JSON), so without
  * this, some malformed JSON silently parses into a different structure
@@ -100,7 +101,13 @@ class PayloadCodec implements PayloadCodecInterface
         }
 
         if ($looksLikeJson) {
-            throw new JsonException(json_last_error_msg(), json_last_error());
+            throw new InvalidPayloadException(
+                [
+                    'The request is not valid JSON: {message}',
+                    'message' => json_last_error_msg(),
+                ],
+                json_last_error()
+            );
         }
 
         $parsed = Yaml::parse($content);

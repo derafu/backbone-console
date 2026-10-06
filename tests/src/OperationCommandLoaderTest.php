@@ -12,6 +12,7 @@ declare(strict_types=1);
 
 namespace Derafu\TestsBackboneConsole;
 
+use Derafu\BackboneConsole\Exception\CommandNotFoundException;
 use Derafu\BackboneConsole\Service\DefaultExitCodeResolver;
 use Derafu\BackboneConsole\Service\GenericOperationCommand;
 use Derafu\BackboneConsole\Service\OperationCommandLoader;
@@ -21,7 +22,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Exception\CommandNotFoundException;
+use Symfony\Component\Console\Exception\CommandNotFoundException as SymfonyCommandNotFoundException;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
@@ -32,6 +33,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 #[UsesClass(GenericOperationCommand::class)]
 #[UsesClass(PayloadCodec::class)]
 #[UsesClass(DefaultExitCodeResolver::class)]
+#[UsesClass(CommandNotFoundException::class)]
 class OperationCommandLoaderTest extends TestCase
 {
     private const COMMAND_NAME = 'example_package:example_component:example_worker:sum';
@@ -74,7 +76,7 @@ class OperationCommandLoaderTest extends TestCase
 
     public function testGetThrowsCommandNotFoundExceptionForAnUnknownName(): void
     {
-        $this->expectException(CommandNotFoundException::class);
+        $this->expectException(SymfonyCommandNotFoundException::class);
 
         $this->loader->get('does:not:exist');
     }

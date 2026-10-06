@@ -14,13 +14,13 @@ namespace Derafu\BackboneConsole\Service;
 
 use Derafu\BackboneConsole\Contract\ExitCodeResolverInterface;
 use Derafu\BackboneConsole\Contract\PayloadCodecInterface;
+use Derafu\BackboneConsole\Exception\CommandNotFoundException;
 use Derafu\BackboneDispatcher\Contract\SafeDispatcherInterface;
 use Derafu\BackboneDispatcher\Contract\SafeExplorerInterface;
 use Derafu\Xml\Service\XmlDecoder;
 use Derafu\Xml\Service\XmlEncoder;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\CommandLoader\CommandLoaderInterface;
-use Symfony\Component\Console\Exception\CommandNotFoundException;
 
 /**
  * Builds one `GenericOperationCommand` per real operation a
@@ -64,9 +64,10 @@ class OperationCommandLoader implements CommandLoaderInterface
         $operation = $this->getOperations()[$name] ?? null;
 
         if ($operation === null) {
-            throw new CommandNotFoundException(
-                sprintf('Command "%s" does not exist.', $name),
-            );
+            throw new CommandNotFoundException([
+                'Command "{name}" does not exist.',
+                'name' => $name,
+            ]);
         }
 
         return new GenericOperationCommand(

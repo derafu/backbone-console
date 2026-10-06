@@ -52,6 +52,12 @@ use Throwable;
  * memory, CPU, load average) are merged in — into `meta` on success,
  * into `extensions` on failure (next to the already-present
  * `debug`/`context`/`throwable`) — never introducing a new top-level key.
+ *
+ * The text of the command (its description, the help of its argument and
+ * options, and the error lines that it writes) is in English, like the one of
+ * the commands of Symfony: it is a technical tool for whoever administers the
+ * application, and it is not translated. The messages of the exceptions of the
+ * package (`Derafu\BackboneConsole\Exception`) are translatable.
  */
 class GenericOperationCommand extends Command
 {
