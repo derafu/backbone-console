@@ -102,6 +102,8 @@ class GenericOperationCommandTest extends TestCase
         $this->assertSame(Command::SUCCESS, $exitCode);
 
         $response = json_decode($tester->getDisplay(), true);
+        $this->assertIsArray($response);
+        $this->assertIsArray($response['meta']);
 
         $this->assertSame(12, $response['data']);
         $this->assertSame('integer', $response['meta']['data_type']);
@@ -123,6 +125,8 @@ class GenericOperationCommandTest extends TestCase
         unlink($path);
 
         $response = json_decode($tester->getDisplay(), true);
+        $this->assertIsArray($response);
+        $this->assertIsArray($response['meta']);
 
         // "meta" itself is always present (timestamp/data_type), but the
         // rest of ExecutionMetadata is verbose-only.
@@ -149,6 +153,8 @@ class GenericOperationCommandTest extends TestCase
         unlink($path);
 
         $data = json_decode($tester->getDisplay(), true);
+        $this->assertIsArray($data);
+        $this->assertIsArray($data['meta']);
 
         $this->assertSame(12, $data['data']);
         $this->assertSame('integer', $data['meta']['data_type']);
@@ -190,7 +196,9 @@ class GenericOperationCommandTest extends TestCase
         unlink($path);
 
         $this->assertSame(Command::SUCCESS, $exitCode);
-        $this->assertSame(15, json_decode($tester->getDisplay(), true)['data']);
+        $response = json_decode($tester->getDisplay(), true);
+        $this->assertIsArray($response);
+        $this->assertSame(15, $response['data']);
     }
 
     public function testFailureWritesTheProblemToStderrAndReturnsTheResolvedExitCode(): void
@@ -235,6 +243,8 @@ class GenericOperationCommandTest extends TestCase
         unlink($path);
 
         $problem = json_decode($tester->getErrorOutput(), true);
+        $this->assertIsArray($problem);
+        $this->assertIsArray($problem['extensions']);
 
         $this->assertIsFloat($problem['extensions']['timestamp']);
         $this->assertNull($problem['extensions']['data_type']);
@@ -263,6 +273,8 @@ class GenericOperationCommandTest extends TestCase
         unlink($path);
 
         $problem = json_decode($tester->getErrorOutput(), true);
+        $this->assertIsArray($problem);
+        $this->assertIsArray($problem['extensions']);
 
         $this->assertArrayHasKey('realTime', $problem['extensions']);
         $this->assertIsInt($problem['extensions']['pid']);
@@ -307,7 +319,9 @@ class GenericOperationCommandTest extends TestCase
         $tester->execute(['input' => $inputPath, '--output' => $outputPath]);
         unlink($inputPath);
 
-        $this->assertSame(12, json_decode((string) file_get_contents($outputPath), true)['data']);
+        $response = json_decode((string) file_get_contents($outputPath), true);
+        $this->assertIsArray($response);
+        $this->assertSame(12, $response['data']);
 
         unlink($outputPath);
     }
@@ -327,7 +341,9 @@ class GenericOperationCommandTest extends TestCase
         unlink($inputPath);
 
         $this->assertSame(Command::SUCCESS, $exitCode);
-        $this->assertSame(12, json_decode($tester->getDisplay(), true)['data']);
+        $response = json_decode($tester->getDisplay(), true);
+        $this->assertIsArray($response);
+        $this->assertSame(12, $response['data']);
     }
 
     public function testAFailedWriteToTheOutputPathReturnsFailureAndReportsItOnTheRealStderr(): void
@@ -518,6 +534,8 @@ class GenericOperationCommandTest extends TestCase
             ->getOperation('example_package', 'example_component', 'example_worker', 'sum')
             ->getValue()
         ;
+        $this->assertIsArray($doc);
+        $this->assertIsString($doc['id']);
 
         $command = new GenericOperationCommand(
             $doc['id'],
@@ -547,6 +565,8 @@ class GenericOperationCommandTest extends TestCase
             ->getOperation('example_package', 'example_component', 'example_worker', 'sum')
             ->getValue()
         ;
+        $this->assertIsArray($doc);
+        $this->assertIsString($doc['id']);
 
         $command = new GenericOperationCommand(
             $doc['id'],
@@ -576,6 +596,8 @@ class GenericOperationCommandTest extends TestCase
             ->getOperation('example_package', 'example_component', 'example_worker', 'sum')
             ->getValue()
         ;
+        $this->assertIsArray($doc);
+        $this->assertIsString($doc['id']);
 
         $command = new GenericOperationCommand(
             $doc['id'],
@@ -604,6 +626,8 @@ class GenericOperationCommandTest extends TestCase
             ->getOperation('example_package', 'example_component', 'example_worker', 'sum')
             ->getValue()
         ;
+        $this->assertIsArray($doc);
+        $this->assertIsString($doc['id']);
 
         $command = new GenericOperationCommand(
             $doc['id'],
@@ -634,6 +658,8 @@ class GenericOperationCommandTest extends TestCase
             ->getOperation('example_package', 'example_component', 'example_worker', 'fail')
             ->getValue()
         ;
+        $this->assertIsArray($doc);
+        $this->assertIsString($doc['id']);
 
         $command = new GenericOperationCommand(
             $doc['id'],

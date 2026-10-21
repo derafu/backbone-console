@@ -56,6 +56,7 @@ class PayloadCodecTest extends TestCase
         );
 
         $this->assertSame(PayloadFormat::Xml, $format);
+        $this->assertIsArray($data['parameters']);
         $this->assertSame('5', $data['parameters']['a']);
     }
 

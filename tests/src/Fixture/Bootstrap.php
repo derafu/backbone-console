@@ -68,6 +68,9 @@ final class Bootstrap
         );
     }
 
+    /**
+     * @return array{ExamplePackageRegistry, Inspector}
+     */
     private static function buildRegistry(): array
     {
         $worker = new ExampleWorker();

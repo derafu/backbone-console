@@ -28,15 +28,15 @@ interface PayloadCodecInterface
      * STDIN, which has none.
      *
      * @param string $content
-     * @return array{0: PayloadFormat, 1: array} The detected format and the
-     * decoded data.
+     * @return array{0: PayloadFormat, 1: array<array-key, mixed>} The detected
+     * format and the decoded data.
      */
     public function decode(string $content): array;
 
     /**
      * Encodes `$data` into `$format`.
      *
-     * @param array $data
+     * @param array<array-key, mixed> $data
      * @param PayloadFormat $format
      * @return string
      */

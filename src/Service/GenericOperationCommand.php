@@ -17,6 +17,8 @@ use Derafu\BackboneConsole\Contract\PayloadCodecInterface;
 use Derafu\BackboneConsole\ValueObject\PayloadFormat;
 use Derafu\BackboneDispatcher\Contract\SafeDispatcherInterface;
 use Derafu\BackboneDispatcher\ValueObject\OperationRequest;
+use Derafu\Translation\Exception\Core\TranslatableLogicException as LogicException;
+use Derafu\Translation\Exception\Logic\TranslatableInvalidArgumentException as InvalidArgumentException;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -87,6 +89,9 @@ class GenericOperationCommand extends Command
      */
     public const EX_SOFTWARE = 70;
 
+    /**
+     * @param array<array-key, mixed>|null $operationDoc
+     */
     public function __construct(
         private readonly string $operationId,
         private readonly SafeDispatcherInterface $dispatcher,
@@ -120,7 +125,7 @@ class GenericOperationCommand extends Command
     protected function configure(): void
     {
         if ($this->operationDoc !== null) {
-            $this->setDescription((string) ($this->operationDoc['summary'] ?? ''));
+            $this->setDescription($this->metadataString($this->operationDoc['summary'] ?? null, 'summary'));
         }
 
         $this->setHelp($this->buildHelp());
@@ -187,7 +192,7 @@ class GenericOperationCommand extends Command
             $result = $this->dispatcher->dispatch($request);
 
             if ($result->isSuccess()) {
-                $outputPath = $input->getOption('output');
+                $outputPath = $this->path($input->getOption('output'), 'output');
                 $meta = ['timestamp' => $result->getMetadata()->getTimestamp()];
                 if ($output->isVerbose()) {
                     $meta += $result->getMetadata()->toArray();
@@ -207,12 +212,15 @@ class GenericOperationCommand extends Command
             }
 
             $problem = $result->getProblem();
+            if ($problem === null) {
+                throw new LogicException('A failed operation result must contain problem details.');
+            }
             $payload = $problem->toArray();
             if ($output->isVerbose()) {
                 $payload['extensions'] += $result->getMetadata()->toArray();
             }
 
-            $errorOutputPath = $input->getOption('error-output');
+            $errorOutputPath = $this->path($input->getOption('error-output'), 'error-output');
             $content = $this->codec->encode(
                 $payload,
                 $this->resolveFormat($errorOutputPath, $format),
@@ -313,7 +321,7 @@ class GenericOperationCommand extends Command
      */
     private function readInput(InputInterface $input, OutputInterface $output): ?string
     {
-        $path = $input->getArgument('input');
+        $path = $this->path($input->getArgument('input'), 'input');
 
         if ($path === null || $path === '-') {
             return (string) file_get_contents('php://stdin');
@@ -365,7 +373,7 @@ class GenericOperationCommand extends Command
      */
     private function buildHelp(): string
     {
-        $description = $this->operationDoc['description'] ?? null;
+        $description = $this->metadataString($this->operationDoc['description'] ?? null, 'description');
 
         $blocks = [
             !empty($description) ? [$description] : [],
@@ -401,23 +409,33 @@ class GenericOperationCommand extends Command
      */
     private function buildParametersHelp(): array
     {
-        $parameters = $this->operationDoc['parameters'] ?? [];
+        $parameters = $this->metadataArray($this->operationDoc['parameters'] ?? [], 'parameters');
         if ($parameters === []) {
             return [];
         }
 
         $lines = ['Parameters (under the "parameters" key of the input):'];
         foreach ($parameters as $parameter) {
-            $requirement = ($parameter['required'] ?? false) ? 'required' : 'optional';
+            $parameter = $this->metadataArray($parameter, 'parameter');
+            $required = $parameter['required'] ?? false;
+            if (!is_bool($required)) {
+                throw new InvalidArgumentException([
+                    'The {field} metadata must be a boolean; {type} given.',
+                    'field' => 'parameter.required',
+                    'type' => get_debug_type($required),
+                ]);
+            }
+            $requirement = $required ? 'required' : 'optional';
             $line = sprintf(
                 '  - %s (%s, %s)',
-                $parameter['name'] ?? '?',
-                $parameter['type'] ?? 'mixed',
+                $this->metadataString($parameter['name'] ?? null, 'parameter.name', '?'),
+                $this->metadataString($parameter['type'] ?? null, 'parameter.type', 'mixed'),
                 $requirement,
             );
 
-            if (!empty($parameter['description'])) {
-                $line .= ': ' . $parameter['description'];
+            $description = $this->metadataString($parameter['description'] ?? null, 'parameter.description');
+            if (!empty($description)) {
+                $line .= ': ' . $description;
             }
 
             $lines[] = $line;
@@ -441,21 +459,25 @@ class GenericOperationCommand extends Command
      */
     private function buildReturnsHelp(): array
     {
-        $returns = $this->operationDoc['returns'] ?? null;
-        if (empty($returns['type']) || in_array($returns['type'], ['void', 'never'], true)) {
+        $returns = $this->metadataArray($this->operationDoc['returns'] ?? [], 'returns');
+        $type = $this->metadataString($returns['type'] ?? null, 'returns.type');
+        if (empty($type) || in_array($type, ['void', 'never'], true)) {
             return [];
         }
 
         $lines = ['Returns:'];
 
-        $line = '  ' . $returns['type'];
-        if (!empty($returns['description'])) {
-            $line .= ' — ' . $returns['description'];
+        $line = '  ' . $type;
+        $description = $this->metadataString($returns['description'] ?? null, 'returns.description');
+        if (!empty($description)) {
+            $line .= ' — ' . $description;
         }
         $lines[] = $line;
 
-        $results = $this->operationDoc['operation']['results'] ?? [];
-        $example = $results['success']['example'] ?? null;
+        $operation = $this->metadataArray($this->operationDoc['operation'] ?? [], 'operation');
+        $results = $this->metadataArray($operation['results'] ?? [], 'operation.results');
+        $success = $this->metadataArray($results['success'] ?? [], 'operation.results.success');
+        $example = $success['example'] ?? null;
         if ($example !== null) {
             $lines[] = '  Example:';
             $encoded = json_encode($example, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -477,16 +499,18 @@ class GenericOperationCommand extends Command
      */
     private function buildThrowsHelp(): array
     {
-        $throws = $this->operationDoc['throws'] ?? [];
+        $throws = $this->metadataArray($this->operationDoc['throws'] ?? [], 'throws');
         if ($throws === []) {
             return [];
         }
 
         $lines = ['Throws:'];
         foreach ($throws as $throw) {
-            $line = '  - ' . ($throw['type'] ?? '?');
-            if (!empty($throw['description'])) {
-                $line .= ': ' . $throw['description'];
+            $throw = $this->metadataArray($throw, 'throw');
+            $line = '  - ' . $this->metadataString($throw['type'] ?? null, 'throw.type', '?');
+            $description = $this->metadataString($throw['description'] ?? null, 'throw.description');
+            if (!empty($description)) {
+                $line .= ': ' . $description;
             }
             $lines[] = $line;
         }
@@ -546,20 +570,73 @@ class GenericOperationCommand extends Command
      */
     private function buildLinksHelp(): array
     {
-        $links = $this->operationDoc['links'] ?? [];
+        $links = $this->metadataArray($this->operationDoc['links'] ?? [], 'links');
         if ($links === []) {
             return [];
         }
 
         $lines = ['Links:'];
         foreach ($links as $link) {
-            $line = '  - ' . ($link['url'] ?? '');
-            if (!empty($link['description'])) {
-                $line .= ': ' . $link['description'];
+            $link = $this->metadataArray($link, 'link');
+            $line = '  - ' . $this->metadataString($link['url'] ?? null, 'link.url');
+            $description = $this->metadataString($link['description'] ?? null, 'link.description');
+            if (!empty($description)) {
+                $line .= ': ' . $description;
             }
             $lines[] = $line;
         }
 
         return $lines;
+    }
+
+    /**
+     * Validates a path supplied by Symfony Console without coercing its value.
+     */
+    private function path(mixed $value, string $name): ?string
+    {
+        if ($value !== null && !is_string($value)) {
+            throw new InvalidArgumentException([
+                'The console {name} path must be string|null; {type} given.',
+                'name' => $name,
+                'type' => get_debug_type($value),
+            ]);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Reads an optional string while preserving its existing null default.
+     */
+    private function metadataString(mixed $value, string $field, string $default = ''): string
+    {
+        if ($value === null) {
+            return $default;
+        }
+        if (!is_string($value)) {
+            throw new InvalidArgumentException([
+                'The {field} metadata must be a string; {type} given.',
+                'field' => $field,
+                'type' => get_debug_type($value),
+            ]);
+        }
+
+        return $value;
+    }
+
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function metadataArray(mixed $value, string $field): array
+    {
+        if (!is_array($value)) {
+            throw new InvalidArgumentException([
+                'The {field} metadata must be an array; {type} given.',
+                'field' => $field,
+                'type' => get_debug_type($value),
+            ]);
+        }
+
+        return $value;
     }
 }

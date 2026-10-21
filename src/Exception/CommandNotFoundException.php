@@ -32,7 +32,7 @@ final class CommandNotFoundException extends SymfonyCommandNotFoundException imp
      * The constructor of the trait does not fit here: the one of Symfony has
      * the alternatives between the message and the code.
      *
-     * @param string|array|TranslatableInterface $message The message.
+     * @param string|array<array-key, mixed>|TranslatableInterface $message The message.
      * @param string[] $alternatives Names of similar commands.
      */
     public function __construct(

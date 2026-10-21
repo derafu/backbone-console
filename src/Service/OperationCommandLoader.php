@@ -17,6 +17,7 @@ use Derafu\BackboneConsole\Contract\PayloadCodecInterface;
 use Derafu\BackboneConsole\Exception\CommandNotFoundException;
 use Derafu\BackboneDispatcher\Contract\SafeDispatcherInterface;
 use Derafu\BackboneDispatcher\Contract\SafeExplorerInterface;
+use Derafu\Translation\Exception\Logic\TranslatableInvalidArgumentException as InvalidArgumentException;
 use Derafu\Xml\Service\XmlDecoder;
 use Derafu\Xml\Service\XmlEncoder;
 use Symfony\Component\Console\Command\Command;
@@ -31,7 +32,7 @@ use Symfony\Component\Console\CommandLoader\CommandLoaderInterface;
 class OperationCommandLoader implements CommandLoaderInterface
 {
     /**
-     * @var array<string, array>|null Command name => the operation's own
+     * @var array<string, array{id: string}>|null Command name => the operation's own
      * doc array (as `SafeExplorerInterface::tree()` returns it, `'id'`
      * included) — built once, on first use.
      */
@@ -93,7 +94,7 @@ class OperationCommandLoader implements CommandLoaderInterface
      * sibling `'description'` key (about the whole package registry, not
      * any one operation) is not relevant here.
      *
-     * @return array<string, array>
+     * @return array<string, array{id: string}>
      */
     private function getOperations(): array
     {
@@ -102,13 +103,28 @@ class OperationCommandLoader implements CommandLoaderInterface
         }
 
         $result = $this->explorer->tree();
-        $packages = $result->isSuccess() ? $result->getValue()['packages'] : [];
+        $packages = [];
+        if ($result->isSuccess()) {
+            $tree = $this->metadataArray($result->getValue(), 'tree');
+            $packages = $this->metadataArray($tree['packages'] ?? null, 'packages');
+        }
 
         $operations = [];
         foreach ($packages as $package) {
-            foreach ($package['components'] ?? [] as $component) {
-                foreach ($component['workers'] ?? [] as $worker) {
-                    foreach ($worker['operations'] ?? [] as $operation) {
+            $package = $this->metadataArray($package, 'package');
+            foreach ($this->metadataArray($package['components'] ?? [], 'components') as $component) {
+                $component = $this->metadataArray($component, 'component');
+                foreach ($this->metadataArray($component['workers'] ?? [], 'workers') as $worker) {
+                    $worker = $this->metadataArray($worker, 'worker');
+                    foreach ($this->metadataArray($worker['operations'] ?? [], 'operations') as $operation) {
+                        $operation = $this->metadataArray($operation, 'operation');
+                        if (!isset($operation['id']) || !is_string($operation['id'])) {
+                            throw new InvalidArgumentException([
+                                'The {field} metadata must be a string; {type} given.',
+                                'field' => 'operation.id',
+                                'type' => get_debug_type($operation['id'] ?? null),
+                            ]);
+                        }
                         $name = GenericOperationCommand::commandNameFor($operation['id']);
                         $operations[$name] = $operation;
                     }
@@ -117,5 +133,21 @@ class OperationCommandLoader implements CommandLoaderInterface
         }
 
         return $this->operations = $operations;
+    }
+
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function metadataArray(mixed $value, string $field): array
+    {
+        if (!is_array($value)) {
+            throw new InvalidArgumentException([
+                'The {field} metadata must be an array; {type} given.',
+                'field' => $field,
+                'type' => get_debug_type($value),
+            ]);
+        }
+
+        return $value;
     }
 }

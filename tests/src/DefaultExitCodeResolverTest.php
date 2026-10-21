@@ -65,6 +65,9 @@ class DefaultExitCodeResolverTest extends TestCase
         ];
     }
 
+    /**
+     * @param class-string<Throwable> $exceptionClass
+     */
     #[DataProvider('dispatcherExceptions')]
     public function testResolvesEachOfTheDispatchersOwnGenericExceptionsToItsOwnCode(
         string $exceptionClass,
