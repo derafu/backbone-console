@@ -4,12 +4,35 @@
 #   imports:
 #       - { resource: '../vendor/derafu/backbone-console/resources/config/backbone-console-services.yaml' }
 
+# Reuses shared dispatch/discovery and XML services. The application supplies
+# PackageRegistryInterface and chooses when to attach CommandLoaderInterface to
+# its Console Application; importing this file does not replace its loader.
+imports:
+    - { resource: '../../../backbone-dispatcher/resources/config/backbone-dispatcher-services.yaml' }
+    - { resource: '../../../xml/resources/config/xml-services.yaml' }
+
 services:
 
     _defaults:
         autowire: true
         autoconfigure: true
         public: false
+
+    Derafu\BackboneConsole\Contract\PayloadCodecInterface:
+        class: Derafu\BackboneConsole\Service\PayloadCodec
+
+    Derafu\BackboneConsole\Contract\ExitCodeResolverInterface:
+        class: Derafu\BackboneConsole\Service\DefaultExitCodeResolver
+
+    Symfony\Component\Console\CommandLoader\CommandLoaderInterface:
+        class: Derafu\BackboneConsole\Service\OperationCommandLoader
+        # The application retrieves this entry point to attach it at runtime.
+        public: true
+        arguments:
+            $explorer: '@Derafu\BackboneDispatcher\Contract\SafeExplorerInterface'
+            $dispatcher: '@Derafu\BackboneDispatcher\Contract\SafeDispatcherInterface'
+            $codec: '@Derafu\BackboneConsole\Contract\PayloadCodecInterface'
+            $exitCodeResolver: '@Derafu\BackboneConsole\Contract\ExitCodeResolverInterface'
 
     # Feeds resources/translations into the consuming app's Translator (the
     # app must pass $resourceProviders: !tagged_iterator

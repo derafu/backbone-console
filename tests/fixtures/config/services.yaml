@@ -1,0 +1,28 @@
+imports:
+    - { resource: '../../../resources/config/backbone-console-services.yaml' }
+
+services:
+    Derafu\Backbone\Contract\PackageRegistryInterface:
+        class: Derafu\TestsBackboneConsole\Fixture\ExamplePackageRegistry
+        calls:
+            - registerPackage: [example_package, '@Derafu\TestsBackboneConsole\Fixture\ExamplePackage']
+
+    Derafu\TestsBackboneConsole\Fixture\ExamplePackage:
+        arguments:
+            $components:
+                example_component: '@Derafu\TestsBackboneConsole\Fixture\ExampleComponent'
+
+    Derafu\TestsBackboneConsole\Fixture\ExampleComponent:
+        arguments:
+            $workers:
+                example_worker: '@Derafu\TestsBackboneConsole\Fixture\WiringWorker'
+
+    Derafu\TestsBackboneConsole\Fixture\WiringWorker: ~
+
+    app.translator:
+        class: Symfony\Component\Translation\Translator
+        factory: ['Derafu\Translation\TranslatorFactory', create]
+        arguments:
+            $defaultLocale: es
+            $fallbackLocales: [en]
+            $resourceProviders: !tagged_iterator derafu_translation.resource_provider

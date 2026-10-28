@@ -1,0 +1,6 @@
+imports:
+    - { resource: services.yaml }
+
+services:
+    Derafu\BackboneConsole\Contract\ExitCodeResolverInterface:
+        class: Derafu\TestsBackboneConsole\Fixture\BusinessExitCodeResolver
