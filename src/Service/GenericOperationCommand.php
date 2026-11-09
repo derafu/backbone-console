@@ -19,6 +19,7 @@ use Derafu\BackboneDispatcher\Contract\SafeDispatcherInterface;
 use Derafu\BackboneDispatcher\ValueObject\OperationRequest;
 use Derafu\Translation\Exception\Core\TranslatableLogicException as LogicException;
 use Derafu\Translation\Exception\Logic\TranslatableInvalidArgumentException as InvalidArgumentException;
+use Derafu\Value\ValueType;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -167,6 +168,7 @@ class GenericOperationCommand extends Command
 
         try {
             [$format, $data] = $this->codec->decode($raw);
+            $parameters = ValueType::map()->parse($data['parameters'] ?? [], path: 'parameters');
         } catch (Throwable $e) {
             $this->errorOutput($output)->writeln(sprintf(
                 'Could not parse the request: %s',
@@ -186,8 +188,6 @@ class GenericOperationCommand extends Command
         // so it still degrades into a structured message instead of
         // Symfony Console's own default exception rendering.
         try {
-            $parameters = is_array($data['parameters'] ?? null) ? $data['parameters'] : [];
-
             $request = OperationRequest::fromId($this->operationId, $parameters);
             $result = $this->dispatcher->dispatch($request);
 

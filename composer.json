@@ -28,6 +28,7 @@
         "php": "^8.5",
         "derafu/backbone-dispatcher": "dev-main",
         "derafu/translation": "dev-main",
+        "derafu/value": "dev-main",
         "derafu/xml": "dev-main",
         "symfony/console": "^8.1",
         "symfony/yaml": "^8.1"

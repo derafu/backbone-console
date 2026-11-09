@@ -24,6 +24,7 @@ use Derafu\TestsBackboneConsole\Fixture\Bootstrap;
 use Derafu\Xml\Service\XmlDecoder;
 use Derafu\Xml\Service\XmlEncoder;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
@@ -423,6 +424,74 @@ class GenericOperationCommandTest extends TestCase
         );
 
         unlink($errorOutputPath);
+    }
+
+    #[TestWith(['{"parameters": [5, 7]}', 'array'])]
+    #[TestWith(['{"parameters": {"a": 5, "0": 7}}', 'array'])]
+    #[TestWith(['{"parameters": "text"}', 'string'])]
+    #[TestWith(['{"parameters": 5}', 'int'])]
+    #[TestWith(['{"parameters": false}', 'bool'])]
+    #[TestWith(["parameters:\n  - 5\n  - 7\n", 'array'])]
+    #[TestWith(['<request><parameters>text</parameters></request>', 'string'])]
+    public function testInvalidParametersAreReportedAsInputErrors(string $payload, string $type): void
+    {
+        $command = new GenericOperationCommand(
+            self::FAIL_OPERATION_ID,
+            $this->dispatcher,
+            $this->codec,
+            new DefaultExitCodeResolver(),
+        );
+        $path = $this->writeTempFile($payload);
+        $tester = new CommandTester($command);
+
+        try {
+            $exitCode = $tester->execute(
+                ['input' => $path],
+                ['capture_stderr_separately' => true],
+            );
+        } finally {
+            unlink($path);
+        }
+
+        $this->assertSame(GenericOperationCommand::EX_DATAERR, $exitCode);
+        $this->assertSame('', $tester->getDisplay());
+        $this->assertStringContainsString(
+            'Could not parse the request: The value at "parameters" must be of type map, ' . $type . ' given.',
+            $tester->getErrorOutput(),
+        );
+        $this->assertStringNotContainsString('Something went wrong while running the operation.', $tester->getErrorOutput());
+    }
+
+    #[TestWith(['{}'])]
+    #[TestWith(['{"parameters": null}'])]
+    #[TestWith(['{"parameters": {}}'])]
+    #[TestWith(['{"parameters": []}'])]
+    #[TestWith(["parameters: null\n"])]
+    #[TestWith(['<request/>'])]
+    public function testAbsentNullAndEmptyParametersReachTheOperation(string $payload): void
+    {
+        $command = new GenericOperationCommand(
+            self::FAIL_OPERATION_ID,
+            $this->dispatcher,
+            $this->codec,
+            new DefaultExitCodeResolver(),
+        );
+        $path = $this->writeTempFile($payload);
+        $tester = new CommandTester($command);
+
+        try {
+            $exitCode = $tester->execute(
+                ['input' => $path],
+                ['capture_stderr_separately' => true],
+            );
+        } finally {
+            unlink($path);
+        }
+
+        $this->assertSame(Command::FAILURE, $exitCode);
+        $this->assertSame('', $tester->getDisplay());
+        $this->assertStringContainsString('Something went wrong while running the operation.', $tester->getErrorOutput());
+        $this->assertStringNotContainsString('Could not parse the request', $tester->getErrorOutput());
     }
 
     public function testMalformedYamlReturnsExDataerrInsteadOfLeakingSymfonysDefaultRendering(): void
