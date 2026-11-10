@@ -132,7 +132,7 @@ class GenericOperationCommandTest extends TestCase
         // "meta" itself is always present (timestamp/data_type), but the
         // rest of ExecutionMetadata is verbose-only.
         $this->assertArrayHasKey('meta', $response);
-        $this->assertArrayNotHasKey('realTime', $response['meta']);
+        $this->assertArrayNotHasKey('real_time', $response['meta']);
         $this->assertArrayNotHasKey('pid', $response['meta']);
     }
 
@@ -159,7 +159,7 @@ class GenericOperationCommandTest extends TestCase
 
         $this->assertSame(12, $data['data']);
         $this->assertSame('integer', $data['meta']['data_type']);
-        $this->assertArrayHasKey('realTime', $data['meta']);
+        $this->assertArrayHasKey('real_time', $data['meta']);
         $this->assertArrayHasKey('pid', $data['meta']);
         $this->assertIsInt($data['meta']['pid']);
     }
@@ -249,7 +249,7 @@ class GenericOperationCommandTest extends TestCase
 
         $this->assertIsFloat($problem['extensions']['timestamp']);
         $this->assertNull($problem['extensions']['data_type']);
-        $this->assertArrayNotHasKey('realTime', $problem['extensions']);
+        $this->assertArrayNotHasKey('real_time', $problem['extensions']);
         $this->assertArrayNotHasKey('pid', $problem['extensions']);
     }
 
@@ -277,7 +277,7 @@ class GenericOperationCommandTest extends TestCase
         $this->assertIsArray($problem);
         $this->assertIsArray($problem['extensions']);
 
-        $this->assertArrayHasKey('realTime', $problem['extensions']);
+        $this->assertArrayHasKey('real_time', $problem['extensions']);
         $this->assertIsInt($problem['extensions']['pid']);
     }
 
